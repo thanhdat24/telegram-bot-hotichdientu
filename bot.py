@@ -218,18 +218,15 @@ def main():
     app.add_handler(MessageHandler(filters.COMMAND, unknown))  # phản hồi lệnh lạ
     app.add_handler(MessageHandler(filters.ALL, log_any))      # log mọi update
 
-    # DÙNG secret path, KHÔNG dùng BOT_TOKEN trong path
+  # DÙNG secret path, KHÔNG dùng BOT_TOKEN trong path
 webhook_path = SECRET_PATH
 webhook_url = f"{WEBHOOK_BASE_URL}/{webhook_path}" if WEBHOOK_BASE_URL else None
 
 logger.info("Webhook path: /%s", webhook_path)
 if webhook_url:
     logger.info("Setting webhook URL to %s", webhook_url)
-    else:
-        logger.warning("WEBHOOK_BASE_URL chưa có/không hợp lệ. Bot vẫn mở cổng, nhưng Telegram sẽ không gửi update tới. Hãy set HTTPS public rồi redeploy.")
 
-    logger.info("Starting webhook on 0.0.0.0:%s, path=/%s", PORT, webhook_path)
-    app.run_webhook(
+app.run_webhook(
     listen="0.0.0.0",
     port=PORT,
     url_path=webhook_path,      # <- SECRET_PATH
