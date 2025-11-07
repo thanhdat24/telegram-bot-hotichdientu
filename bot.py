@@ -1,5 +1,4 @@
 import os
-import asyncio
 import logging
 from html import escape
 
@@ -8,28 +7,43 @@ from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-# ---------- Logging ----------
+# ---------------- Logging ----------------
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO,
 )
 logger = logging.getLogger(__name__)
 
-HIGHLIGHT_EMOJI = "🟢"  # mục có hồ sơ
-ZERO_EMOJI = "⚪️"       # mục 0 hồ sơ
+HIGHLIGHT_EMOJI = "🟢"
+ZERO_EMOJI = "⚪️"
 
 load_dotenv()
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-BEARER_TOKEN = os.getenv("BEARER_TOKEN")
-PORT = int(os.getenv("PORT", "8080"))  # Railway cung cấp PORT
-WEBHOOK_BASE_URL = os.getenv("WEBHOOK_BASE_URL")  # ví dụ: https://your-service.up.railway.app
+
+# ---------------- ENV & sanitize ----------------
+def _clean(s: str) -> str:
+    """Trim spaces and strip invisible characters that break URLs."""
+    if not s:
+        return ""
+    # remove non-printable ASCII except \n\r\t
+    s = "".join(ch for ch in s if 32 <= ord(ch) <= 126)
+    return s.strip()
+
+BOT_TOKEN = _clean(os.getenv("BOT_TOKEN"))
+BEARER_TOKEN = _clean(os.getenv("BEARER_TOKEN"))
+PORT = int(os.getenv("PORT", "8080"))
+WEBHOOK_BASE_URL = _clean(os.getenv("WEBHOOK_BASE_URL"))
+WEBHOOK_BASE_URL = WEBHOOK_BASE_URL.rstrip("/")
+
+# Nếu người dùng lỡ set về localhost → bỏ qua (Telegram yêu cầu HTTPS public)
+if WEBHOOK_BASE_URL.lower().startswith(("http://localhost", "http://127.0.0.1")):
+    logger.warning("WEBHOOK_BASE_URL trỏ localhost, sẽ bỏ qua để tránh lỗi. Hãy đặt HTTPS public: https://<app>.up.railway.app")
+    WEBHOOK_BASE_URL = ""
+
+if WEBHOOK_BASE_URL and not WEBHOOK_BASE_URL.lower().startswith("https://"):
+    logger.warning("WEBHOOK_BASE_URL nên là HTTPS public (vd: https://<app>.up.railway.app). Giá trị hiện tại: %s", WEBHOOK_BASE_URL)
 
 if not BOT_TOKEN:
-    raise RuntimeError("Missing BOT_TOKEN")
-if not BEARER_TOKEN:
-    logger.warning("BEARER_TOKEN is empty; APIs có thể trả lỗi 401.")
-if not WEBHOOK_BASE_URL:
-    logger.warning("WEBHOOK_BASE_URL chưa có; hãy set lại sau khi có domain Railway.")
+    raise RuntimeError("Missing BOT_TOKEN environment variable")
 
 HEADERS = {
     "Authorization": f"Bearer {BEARER_TOKEN}" if BEARER_TOKEN else "",
@@ -151,11 +165,6 @@ def fetch_total(url: str, body: dict) -> int:
         return 0
 
 def format_lines(totals: dict[str, int]) -> str:
-    """
-    Giữ nguyên thứ tự các lĩnh vực.
-    Mục có hồ sơ: biểu tượng 🟢 và in đậm.
-    Mục không có hồ sơ: biểu tượng ⚪️ và text thường.
-    """
     lines = ['<b>📊 Thống kê hồ sơ từng lĩnh vực:</b>']
     for name, total in totals.items():
         if total > 0:
@@ -164,6 +173,13 @@ def format_lines(totals: dict[str, int]) -> str:
             lines.append(f"- {ZERO_EMOJI} {escape(name)}: {total} hồ sơ")
     return "\n".join(lines)
 
+# ---------------- Handlers ----------------
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Xin chào! Gõ /thongke để xem thống kê.")
+
+async def ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("pong")
+
 async def thongke(update: Update, context: ContextTypes.DEFAULT_TYPE):
     totals = {}
     for label, cfg in ENDPOINTS.items():
@@ -171,31 +187,27 @@ async def thongke(update: Update, context: ContextTypes.DEFAULT_TYPE):
     html = format_lines(totals)
     await update.message.reply_html(html)
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Xin chào! Gõ /thongke để xem thống kê.")
-
-async def ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("pong")
-
 def main():
-    application = ApplicationBuilder().token(BOT_TOKEN).build()
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("ping", ping))
-    application.add_handler(CommandHandler("thongke", thongke))
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    # Webhook path dùng BOT_TOKEN để Telegram gọi
-    webhook_path = BOT_TOKEN
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("ping", ping))
+    app.add_handler(CommandHandler("thongke", thongke))
+
+    webhook_path = BOT_TOKEN  # path khó đoán
     webhook_url = f"{WEBHOOK_BASE_URL}/{webhook_path}" if WEBHOOK_BASE_URL else None
-    logger.info("Starting webhook on 0.0.0.0:%s, path=/%s", PORT, webhook_path)
+
     if webhook_url:
         logger.info("Setting webhook URL to %s", webhook_url)
+    else:
+        logger.warning("WEBHOOK_BASE_URL chưa có/không hợp lệ. Bot vẫn mở cổng chờ, nhưng Telegram sẽ không gửi update tới. Hãy set HTTPS public rồi redeploy.")
 
-    # Chạy webhook (aiohttp server bên trong)
-    application.run_webhook(
+    logger.info("Starting webhook on 0.0.0.0:%s, path=/%s", PORT, webhook_path)
+    app.run_webhook(
         listen="0.0.0.0",
         port=PORT,
         url_path=webhook_path,
-        webhook_url=webhook_url,
+        webhook_url=webhook_url,          # None → không setWebhook (tránh crash)
         drop_pending_updates=True,
     )
 
