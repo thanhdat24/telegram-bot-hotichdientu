@@ -32,9 +32,9 @@ BOT_TOKEN = _clean(os.getenv("BOT_TOKEN"))
 BEARER_TOKEN = _clean(os.getenv("BEARER_TOKEN"))
 PORT = int(os.getenv("PORT", "8080"))
 
+# Lấy base URL và secret path
 WEBHOOK_BASE_URL = _clean(os.getenv("WEBHOOK_BASE_URL")).rstrip("/")
-# Secret path KHÔNG có dấu ":" để tránh 404 qua proxy
-SECRET_PATH = _clean(os.getenv("WEBHOOK_SECRET_PATH")) or f"hook-{_clean(os.getenv('BOT_TOKEN')).replace(':', '-') or 'tg'}"
+SECRET_PATH = _clean(os.getenv("WEBHOOK_SECRET_PATH")) or f"hook-{BOT_TOKEN.replace(':','-')}"
 
 if not BOT_TOKEN:
     raise RuntimeError("Missing BOT_TOKEN environment variable")
@@ -218,23 +218,24 @@ def main():
     app.add_handler(MessageHandler(filters.COMMAND, unknown))  # phản hồi lệnh lạ
     app.add_handler(MessageHandler(filters.ALL, log_any))      # log mọi update
 
-    webhook_path = SECRET_PATH
-    webhook_url = f"{WEBHOOK_BASE_URL}/{webhook_path}" if WEBHOOK_BASE_URL else None
+    # DÙNG secret path, KHÔNG dùng BOT_TOKEN trong path
+webhook_path = SECRET_PATH
+webhook_url = f"{WEBHOOK_BASE_URL}/{webhook_path}" if WEBHOOK_BASE_URL else None
 
-    logger.info("Webhook path: /%s", webhook_path)
-    if webhook_url:
-        logger.info("Setting webhook URL to %s", webhook_url)
+logger.info("Webhook path: /%s", webhook_path)
+if webhook_url:
+    logger.info("Setting webhook URL to %s", webhook_url)
     else:
         logger.warning("WEBHOOK_BASE_URL chưa có/không hợp lệ. Bot vẫn mở cổng, nhưng Telegram sẽ không gửi update tới. Hãy set HTTPS public rồi redeploy.")
 
     logger.info("Starting webhook on 0.0.0.0:%s, path=/%s", PORT, webhook_path)
     app.run_webhook(
-        listen="0.0.0.0",
-        port=PORT,
-        url_path=webhook_path,   # KHÔNG còn dấu ":" trong path
-        webhook_url=webhook_url, # PTB sẽ gọi setWebhook tới URL này
-        drop_pending_updates=True,
-    )
+    listen="0.0.0.0",
+    port=PORT,
+    url_path=webhook_path,      # <- SECRET_PATH
+    webhook_url=webhook_url,    # <- .../SECRET_PATH
+    drop_pending_updates=True,
+)
 
 if __name__ == "__main__":
     main()
