@@ -1,9 +1,0 @@
-{
-  "build": {
-    "builder": "docker"
-  },
-  "deploy": {
-    "numReplicas": 1,
-    "sleep": false
-  }
-}
