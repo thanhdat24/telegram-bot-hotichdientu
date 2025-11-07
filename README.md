@@ -1,16 +1,16 @@
-# Telegram Bot (Webhook) — Railway (Patched)
+# Telegram Bot (Webhook) — Railway (Async)
 
-## Triển khai
+- Dùng `httpx` async + `asyncio.gather` để gọi các API song song (không block event loop).
+- Trả lời sớm "⏳ Đang lấy số liệu..." rồi edit lại tin nhắn khi xong.
+
+## Deploy
 1. Push repo lên GitHub.
 2. Railway → New Project → Deploy from GitHub.
 3. Variables:
-   - `BOT_TOKEN` (bắt buộc)
-   - `BEARER_TOKEN` (nếu API cần)
-   - *(Đợi có domain rồi thêm)* `WEBHOOK_BASE_URL=https://<app>.up.railway.app`
-4. Deploy lần 1 xong → lấy domain public → thêm `WEBHOOK_BASE_URL` → Redeploy.
-5. Test `/ping`, `/thongke`.
+   - `BOT_TOKEN`
+   - `BEARER_TOKEN` (nếu API yêu cầu)
+   - *(sau khi có domain)* `WEBHOOK_BASE_URL=https://<app>.up.railway.app`
+4. Redeploy.
+5. Test `/ping` và `/thongke`.
 
-### Ghi chú
-- Code đã **làm sạch** env để tránh lỗi `Invalid non-printable ASCII character in URL`.
-- Nếu vô tình đặt `WEBHOOK_BASE_URL=http://localhost:...`, code sẽ **bỏ qua** setWebhook và cảnh báo, tránh crash.
-- Telegram yêu cầu URL **HTTPS public**.
+Gợi ý kiểm tra webhook: `https://api.telegram.org/bot<BOT_TOKEN>/getWebhookInfo`
