@@ -24,7 +24,21 @@ ZERO_EMOJI = "⚪️"
 load_dotenv()
 
 # ---------------- ENV & sanitize ----------------
-ADMIN_USER_ID = int(os.getenv("ADMIN_USER_ID", "0"))  # tuỳ chọn: id telegram của bạn; 0 = không bật kiểm soát
+def _clean(s: str | None) -> str:
+    if not s:
+        return ""
+    s = "".join(ch for ch in s if 32 <= ord(ch) <= 126)
+    return s.strip()
+
+BOT_TOKEN = _clean(os.getenv("BOT_TOKEN"))
+PORT = int(os.getenv("PORT", "8080"))
+
+WEBHOOK_BASE_URL = _clean(os.getenv("WEBHOOK_BASE_URL")).rstrip("/")
+SECRET_PATH = _clean(os.getenv("WEBHOOK_SECRET_PATH")) or f"hook-{(_clean(os.getenv('BOT_TOKEN'))).replace(':','-') or 'tg'}"
+
+# --- token API & quyền đổi token ---
+BEARER_TOKEN = _clean(os.getenv("BEARER_TOKEN"))  # <- ĐỊNH NGHĨA TRƯỚC
+ADMIN_USER_ID = int(os.getenv("ADMIN_USER_ID", "0"))  # 0 = không giới hạn ai dùng /settoken
 
 # dùng biến toàn cục để cập nhật token "nóng"
 CURRENT_BEARER_TOKEN = BEARER_TOKEN
@@ -35,19 +49,6 @@ def get_headers() -> dict:
         "Content-Type": "application/json",
     }
 
-def _clean(s: str | None) -> str:
-    if not s:
-        return ""
-    s = "".join(ch for ch in s if 32 <= ord(ch) <= 126)
-    return s.strip()
-
-BOT_TOKEN = _clean(os.getenv("BOT_TOKEN"))
-BEARER_TOKEN = _clean(os.getenv("BEARER_TOKEN"))
-PORT = int(os.getenv("PORT", "8080"))
-
-WEBHOOK_BASE_URL = _clean(os.getenv("WEBHOOK_BASE_URL")).rstrip("/")
-SECRET_PATH = _clean(os.getenv("WEBHOOK_SECRET_PATH")) or f"hook-{(_clean(os.getenv('BOT_TOKEN'))).replace(':','-') or 'tg'}"
-
 if not BOT_TOKEN:
     raise RuntimeError("Missing BOT_TOKEN environment variable")
 
@@ -57,11 +58,6 @@ if WEBHOOK_BASE_URL.lower().startswith(("http://localhost", "http://127.0.0.1"))
     WEBHOOK_BASE_URL = ""
 if WEBHOOK_BASE_URL and not WEBHOOK_BASE_URL.lower().startswith("https://"):
     logger.warning("WEBHOOK_BASE_URL nên là HTTPS public. Hiện tại: %s", WEBHOOK_BASE_URL)
-
-HEADERS = {
-    "Authorization": f"Bearer {BEARER_TOKEN}" if BEARER_TOKEN else "",
-    "Content-Type": "application/json",
-}
 
 # ====== ENDPOINTS ======
 ENDPOINTS = {
@@ -120,7 +116,6 @@ async def fetch_total_async(client: httpx.AsyncClient, url: str, body: dict) -> 
         logger.warning("fetch_total error for %s: %s", url, e)
         return 0, False
 
-
 def format_lines(totals: dict[str, int]) -> str:
     lines = ['<b>📊 Thống kê hồ sơ từng lĩnh vực:</b>']
     for name, total in totals.items():
@@ -147,7 +142,7 @@ async def thongke(update: Update, context: ContextTypes.DEFAULT_TYPE):
             tasks.append(fetch_total_async(client, cfg["url"], cfg["body"]))
         results = await asyncio.gather(*tasks)
 
-    totals = {}
+    totals: dict[str, int] = {}
     for (label, (total, unauthorized)) in zip(labels, results):
         totals[label] = total
         if unauthorized:
@@ -157,7 +152,7 @@ async def thongke(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if unauthorized_any:
         html = (
             "❗️ <b>BEARER_TOKEN có thể đã hết hạn hoặc không hợp lệ (401)</b>\n"
-            "→ Vui lòng cập nhật token bằng lệnh <code>/settoken &lt;token_mới&gt;</code>\n\n"
+            "→ Cập nhật bằng lệnh <code>/settoken &lt;token_mới&gt;</code>\n\n"
             + html
         )
 
@@ -166,32 +161,19 @@ async def thongke(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception:
         await update.message.reply_html(html)
 
-
-async def log_any(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        logger.info("Got update: %s", update.to_dict())
-    except Exception:
-        pass
-
-async def unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Mình chưa hiểu lệnh này. Thử /ping hoặc /thongke nhé.")
-    
 async def settoken(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global CURRENT_BEARER_TOKEN
     user_id = update.effective_user.id if update.effective_user else 0
 
-    # nếu bạn set ADMIN_USER_ID != 0 thì chỉ user đó mới được phép đổi
     if ADMIN_USER_ID and user_id != ADMIN_USER_ID:
         await update.message.reply_text("⛔️ Bạn không có quyền dùng lệnh này.")
         return
 
-    # ghép token từ phần còn lại của message: /settoken <token>
     if not context.args:
         await update.message.reply_text("Cách dùng: /settoken <token_mới>")
         return
 
     new_token = " ".join(context.args).strip()
-    # làm sạch ký tự ẩn
     new_token = "".join(ch for ch in new_token if 32 <= ord(ch) <= 126)
 
     if not new_token:
@@ -201,7 +183,6 @@ async def settoken(update: Update, context: ContextTypes.DEFAULT_TYPE):
     CURRENT_BEARER_TOKEN = new_token
     await update.message.reply_text("✅ Đã cập nhật BEARER_TOKEN. Thử lại /thongke.")
     logger.info("BEARER_TOKEN updated at runtime by user_id=%s", user_id)
-
 
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     masked = (CURRENT_BEARER_TOKEN[:4] + "..." + CURRENT_BEARER_TOKEN[-4:]) if CURRENT_BEARER_TOKEN and len(CURRENT_BEARER_TOKEN) > 8 else (CURRENT_BEARER_TOKEN or "(empty)")
@@ -213,6 +194,14 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"- ADMIN_USER_ID: {ADMIN_USER_ID or '(disabled)'}"
     )
 
+async def log_any(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        logger.info("Got update: %s", update.to_dict())
+    except Exception:
+        pass
+
+async def unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Mình chưa hiểu lệnh này. Thử /ping hoặc /thongke nhé.")
 
 # ===== Main =====
 def main():
@@ -226,7 +215,6 @@ def main():
     app.add_handler(MessageHandler(filters.COMMAND, unknown))
     app.add_handler(MessageHandler(filters.ALL, log_any))
 
-    # ---- ĐẶT BÊN TRONG main(): app ở đúng scope ----
     webhook_path = SECRET_PATH
     webhook_url = f"{WEBHOOK_BASE_URL}/{webhook_path}" if WEBHOOK_BASE_URL else None
 
