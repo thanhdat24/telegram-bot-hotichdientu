@@ -170,7 +170,7 @@ async def settoken(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if not context.args:
-        await update.message.reply_text("Cách dùng: /settoken <token_mới>")
+        await update.message.reply_text("Cách dùng: /settoken")
         return
 
     new_token = " ".join(context.args).strip()
